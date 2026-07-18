@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import android.widget.Toast
+import com.example.foamdartbattle.game.GameStateHolder
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofenceStatusCodes
 import com.google.android.gms.location.GeofencingEvent
@@ -25,12 +26,17 @@ class GeofenceBroadcastReceiver : BroadcastReceiver() {
         if (geofenceTransition == Geofence.GEOFENCE_TRANSITION_ENTER ||
             geofenceTransition == Geofence.GEOFENCE_TRANSITION_EXIT) {
             val triggeringGeofences = geofencingEvent.triggeringGeofences
-            Log.d("GeofenceReceiver", "Transition \$geofenceTransition triggered for \$triggeringGeofences")
+            Log.d("GeofenceReceiver", "Transition $geofenceTransition triggered for $triggeringGeofences")
             
+            val isOutside = geofenceTransition == Geofence.GEOFENCE_TRANSITION_EXIT
+            GameStateHolder.updateState { 
+                it.copy(isOutsideZone = isOutside)
+            }
+
             val transitionString = if (geofenceTransition == Geofence.GEOFENCE_TRANSITION_ENTER) "entered" else "exited"
-            Toast.makeText(context, "You \$transitionString the battle zone!", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "You $transitionString the battle zone!", Toast.LENGTH_LONG).show()
         } else {
-            Log.e("GeofenceReceiver", "Invalid transition type: \$geofenceTransition")
+            Log.e("GeofenceReceiver", "Invalid transition type: $geofenceTransition")
         }
     }
 }

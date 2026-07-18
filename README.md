@@ -36,6 +36,12 @@ To run this project, you will need a Google Maps Platform API Key.
 4. **Build and Run:**
    Build the project and deploy it to a physical Android device or an emulator with Google Play Services installed.
 
+## Development Attribution
+
+This project was developed with the active assistance of **Gemini CLI**, an interactive AI coding assistant. We believe in transparency in software engineering and are proud to highlight the collaborative role of AI tools in modern software development.
+
+While we are willing to review issues and pull requests to the best of our ability, please keep in mind that both humans and AI assistants can make mistakes. We are committed to working together with the community to try and solve them!
+
 ## License
 
 This project is open-sourced under the MIT License. See the [LICENSE](LICENSE) file for details.

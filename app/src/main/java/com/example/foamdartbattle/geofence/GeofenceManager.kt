@@ -10,6 +10,8 @@ import com.google.android.gms.location.GeofencingClient
 import com.google.android.gms.location.GeofencingRequest
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.maps.model.LatLng
+import com.google.maps.android.PolyUtil
+import com.google.maps.android.SphericalUtil
 
 class GeofenceManager(private val context: Context) {
     private val geofencingClient: GeofencingClient = LocationServices.getGeofencingClient(context)
@@ -57,6 +59,7 @@ class GeofenceManager(private val context: Context) {
     }
     
     fun calculateCenter(points: List<LatLng>): LatLng {
+        if (points.isEmpty()) return LatLng(0.0, 0.0)
         var lat = 0.0
         var lng = 0.0
         points.forEach { 
@@ -67,18 +70,29 @@ class GeofenceManager(private val context: Context) {
     }
 
     fun calculateRadius(center: LatLng, points: List<LatLng>): Float {
-        val results = FloatArray(1)
-        var maxDistance = 0f
-        for (point in points) {
-            android.location.Location.distanceBetween(
-                center.latitude, center.longitude,
-                point.latitude, point.longitude,
-                results
-            )
-            if (results[0] > maxDistance) {
-                maxDistance = results[0]
+        if (points.size < 3) return 0f
+        
+        var minDistance = Double.MAX_VALUE
+        for (i in points.indices) {
+            val start = points[i]
+            val end = points[(i + 1) % points.size]
+            val dist = PolyUtil.distanceToLine(center, start, end)
+            if (dist < minDistance) {
+                minDistance = dist
             }
         }
-        return maxDistance
+        return minDistance.toFloat()
+    }
+
+    fun calculateCircumscribedRadius(center: LatLng, points: List<LatLng>): Float {
+        if (points.isEmpty()) return 0f
+        var maxDistance = 0f
+        for (point in points) {
+            val dist = SphericalUtil.computeDistanceBetween(center, point)
+            if (dist > maxDistance) {
+                maxDistance = dist.toFloat()
+            }
+        }
+        return maxDistance + 10f // Add a 10-meter buffer so it begins slightly outside
     }
 }
