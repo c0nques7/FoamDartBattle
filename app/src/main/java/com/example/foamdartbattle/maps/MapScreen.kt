@@ -1044,6 +1044,18 @@ fun MenuControls(
         verticalArrangement = Arrangement.spacedBy(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Button(
+            onClick = onToggleArView,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ),
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(vertical = 6.dp)
+        ) {
+            Text("AR HUD", fontSize = 11.sp)
+        }
+
         if (isGameActive) {
             Button(
                 onClick = onToggleMapLock,
@@ -1055,18 +1067,6 @@ fun MenuControls(
                 contentPadding = PaddingValues(vertical = 6.dp)
             ) {
                 Text(if (isMapLocked) "🔓 Unlock" else "🔒 Lock", fontSize = 11.sp)
-            }
-
-            Button(
-                onClick = onToggleArView,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                ),
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(vertical = 6.dp)
-            ) {
-                Text("AR HUD", fontSize = 11.sp)
             }
 
             LongPressButton(
