@@ -8,6 +8,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
@@ -27,6 +30,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 import com.example.foamdartbattle.game.GamePhase
 import com.example.foamdartbattle.game.GameSettings
 import com.example.foamdartbattle.game.GameState
@@ -53,6 +58,13 @@ fun MapScreen(
 
     var showSettingsSheet by remember { mutableStateOf(false) }
     var currentSettings by remember { mutableStateOf(GameSettings()) }
+    var savedProfiles by remember { mutableStateOf(listOf<SavedBattleProfile>()) }
+    var profileNameInput by remember { mutableStateOf("") }
+    var activeProfileId by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        savedProfiles = SavedProfilesManager.loadProfiles(context)
+    }
 
     var hasLocationPermission by remember {
         mutableStateOf(
@@ -170,8 +182,26 @@ fun MapScreen(
                 onMapClick = { latLng ->
                     android.util.Log.d("MapScreen", "onMapClick triggered: $latLng")
                     if (!gameState.isGameActive && activeDrawMode == DrawMode.TAP_POINTS) {
-                        polygonPoints = polygonPoints + latLng
-                        Toast.makeText(context, "Boundary point added!", Toast.LENGTH_SHORT).show()
+                        if (polygonPoints.size >= 4) {
+                            Toast.makeText(context, "Geofence is limited to 4 points! Drag them to modify, or tap Clear.", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val updatedPoints = polygonPoints + latLng
+                            if (updatedPoints.size == 4) {
+                                // Find centroid of the 4 tapped points
+                                val avgLat = updatedPoints.map { it.latitude }.average()
+                                val avgLng = updatedPoints.map { it.longitude }.average()
+
+                                // Sort the 4 points by their polar angle relative to the centroid
+                                // This aligns the geofence perimeter perfectly around the exact taps without changing their locations!
+                                polygonPoints = updatedPoints.sortedBy { point ->
+                                    Math.atan2(point.latitude - avgLat, point.longitude - avgLng)
+                                }
+                                Toast.makeText(context, "Aligned geofence around perimeter!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                polygonPoints = updatedPoints
+                                Toast.makeText(context, "Boundary point added!", Toast.LENGTH_SHORT).show()
+                            }
+                        }
                     }
                 }
             ) {
@@ -220,7 +250,45 @@ fun MapScreen(
                         LaunchedEffect(markerState.isDragging) {
                             if (wasDragging && !markerState.isDragging) {
                                 val newPoints = polygonPoints.toMutableList()
-                                newPoints[index] = markerState.position
+                                val newPos = markerState.position
+                                if (activeDrawMode == DrawMode.BOX_DRAW && polygonPoints.size == 4) {
+                                    // Axis-aligned rectangular constraints: dragging any corner automatically
+                                    // adjusts the adjacent corners to maintain a perfect box/rectangle
+                                    when (index) {
+                                        0 -> { // Bottom-Left (minLat, minLng)
+                                            newPoints[0] = newPos
+                                            newPoints[1] = LatLng(newPoints[1].latitude, newPos.longitude)
+                                            newPoints[3] = LatLng(newPos.latitude, newPoints[3].longitude)
+                                        }
+                                        1 -> { // Top-Left (maxLat, minLng)
+                                            newPoints[1] = newPos
+                                            newPoints[0] = LatLng(newPoints[0].latitude, newPos.longitude)
+                                            newPoints[2] = LatLng(newPos.latitude, newPoints[2].longitude)
+                                        }
+                                        2 -> { // Top-Right (maxLat, maxLng)
+                                            newPoints[2] = newPos
+                                            newPoints[3] = LatLng(newPoints[3].latitude, newPos.longitude)
+                                            newPoints[1] = LatLng(newPos.latitude, newPoints[1].longitude)
+                                        }
+                                        3 -> { // Bottom-Right (minLat, maxLng)
+                                            newPoints[3] = newPos
+                                            newPoints[2] = LatLng(newPoints[2].latitude, newPos.longitude)
+                                            newPoints[0] = LatLng(newPos.latitude, newPoints[0].longitude)
+                                        }
+                                    }
+                                } else {
+                                    // Individual points can be dragged independently
+                                    newPoints[index] = newPos
+                                    if (newPoints.size == 4) {
+                                        // Automatically re-sort points relative to their centroid upon dragging
+                                        // to keep the perimeter clean and prevent crossed lines
+                                        val avgLat = newPoints.map { it.latitude }.average()
+                                        val avgLng = newPoints.map { it.longitude }.average()
+                                        newPoints.sortBy { point ->
+                                            Math.atan2(point.latitude - avgLat, point.longitude - avgLng)
+                                        }
+                                    }
+                                }
                                 polygonPoints = newPoints
                             }
                             wasDragging = markerState.isDragging
@@ -244,7 +312,7 @@ fun MapScreen(
             }
 
             // --- BOX DRAW GESTURE OVERLAY ---
-            if (!gameState.isGameActive && activeDrawMode == DrawMode.BOX_DRAW) {
+            if (!gameState.isGameActive && activeDrawMode == DrawMode.BOX_DRAW && polygonPoints.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -442,9 +510,11 @@ fun MapScreen(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)),
                     elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
                 ) {
-                    // Vertical layout
+                    // Scrollable vertical layout
                     Column(
-                        modifier = Modifier.padding(10.dp),
+                        modifier = Modifier
+                            .padding(10.dp)
+                            .verticalScroll(rememberScrollState()),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -474,6 +544,163 @@ fun MapScreen(
                                 activeMode = activeDrawMode,
                                 onModeSelected = { activeDrawMode = it }
                             )
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+                            
+                            Text("SAVED MAPS", fontSize = 8.sp, color = labelColor, fontWeight = FontWeight.Bold)
+                            
+                            if (savedProfiles.isEmpty()) {
+                                Text("No saved maps", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                            } else {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    savedProfiles.forEach { profile ->
+                                        val isActive = activeProfileId == profile.id
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    // Load profile points and settings, and mark as active edit profile!
+                                                    polygonPoints = profile.points.map { LatLng(it.lat, it.lng) }
+                                                    currentSettings = GameSettings(
+                                                        maxRounds = profile.maxRounds,
+                                                        prepTimeSeconds = profile.prepTimeSeconds,
+                                                        shrinkTimeSeconds = profile.shrinkTimeSeconds,
+                                                        showNextRing = profile.showNextRing
+                                                    )
+                                                    activeProfileId = profile.id
+                                                    profileNameInput = profile.name
+                                                    Toast.makeText(context, "Loaded: ${profile.name}", Toast.LENGTH_SHORT).show()
+                                                },
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                                            ),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = profile.name,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.weight(1f),
+                                                    maxLines = 1
+                                                )
+                                                IconButton(
+                                                    onClick = {
+                                                        val updated = savedProfiles.filter { it.id != profile.id }
+                                                        SavedProfilesManager.saveProfiles(context, updated)
+                                                        savedProfiles = updated
+                                                        if (activeProfileId == profile.id) {
+                                                            activeProfileId = null
+                                                            profileNameInput = ""
+                                                        }
+                                                        Toast.makeText(context, "Deleted map", Toast.LENGTH_SHORT).show()
+                                                    },
+                                                    modifier = Modifier.size(16.dp)
+                                                ) {
+                                                    Text("🗑️", fontSize = 9.sp, color = MaterialTheme.colorScheme.error)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(2.dp))
+
+                            // Profile Saving / Editing Panel
+                            OutlinedTextField(
+                                value = profileNameInput,
+                                onValueChange = { profileNameInput = it },
+                                label = { Text(if (activeProfileId != null) "Edit Name" else "Map Name", fontSize = 8.sp) },
+                                modifier = Modifier.fillMaxWidth().height(44.dp),
+                                singleLine = true,
+                                textStyle = LocalTextStyle.current.copy(fontSize = 10.sp)
+                            )
+
+                            if (activeProfileId != null) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            val name = profileNameInput.trim()
+                                            if (name.isNotEmpty()) {
+                                                val updated = savedProfiles.map {
+                                                    if (it.id == activeProfileId) {
+                                                        it.copy(
+                                                            name = name,
+                                                            points = polygonPoints.map { PointDouble(it.latitude, it.longitude) },
+                                                            maxRounds = currentSettings.maxRounds,
+                                                            prepTimeSeconds = currentSettings.prepTimeSeconds,
+                                                            shrinkTimeSeconds = currentSettings.shrinkTimeSeconds,
+                                                            showNextRing = currentSettings.showNextRing
+                                                        )
+                                                    } else it
+                                                }
+                                                SavedProfilesManager.saveProfiles(context, updated)
+                                                savedProfiles = updated
+                                                profileNameInput = ""
+                                                activeProfileId = null
+                                                Toast.makeText(context, "Map updated!", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1.2f).height(28.dp),
+                                        contentPadding = PaddingValues(horizontal = 2.dp)
+                                    ) {
+                                        Text("Update", fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            activeProfileId = null
+                                            profileNameInput = ""
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                                        modifier = Modifier.weight(0.8f).height(28.dp),
+                                        contentPadding = PaddingValues(horizontal = 2.dp)
+                                    ) {
+                                        Text("Cancel", fontSize = 8.sp)
+                                    }
+                                }
+                            } else {
+                                Button(
+                                    onClick = {
+                                        val name = profileNameInput.trim()
+                                        if (name.isNotEmpty()) {
+                                            val newProfile = SavedBattleProfile(
+                                                id = java.util.UUID.randomUUID().toString(),
+                                                name = name,
+                                                points = polygonPoints.map { PointDouble(it.latitude, it.longitude) },
+                                                maxRounds = currentSettings.maxRounds,
+                                                prepTimeSeconds = currentSettings.prepTimeSeconds,
+                                                shrinkTimeSeconds = currentSettings.shrinkTimeSeconds,
+                                                showNextRing = currentSettings.showNextRing
+                                            )
+                                            val updated = savedProfiles + newProfile
+                                            SavedProfilesManager.saveProfiles(context, updated)
+                                            savedProfiles = updated
+                                            profileNameInput = ""
+                                            Toast.makeText(context, "Saved as new!", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(context, "Enter map name", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(28.dp),
+                                    contentPadding = PaddingValues(vertical = 4.dp)
+                                ) {
+                                    Text("Save Current", fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
 
                         HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
@@ -927,6 +1154,41 @@ fun DrawModeSelector(
                     Text(text, fontSize = 8.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 }
             }
+        }
+    }
+}
+
+@kotlinx.serialization.Serializable
+data class SavedBattleProfile(
+    val id: String,
+    val name: String,
+    val points: List<PointDouble>,
+    val maxRounds: Int,
+    val prepTimeSeconds: Int,
+    val shrinkTimeSeconds: Int,
+    val showNextRing: Boolean
+)
+
+@kotlinx.serialization.Serializable
+data class PointDouble(val lat: Double, val lng: Double)
+
+object SavedProfilesManager {
+    private const val PREFS_NAME = "foam_dart_battle_profiles"
+    private const val KEY_PROFILES = "saved_profiles"
+
+    fun saveProfiles(context: android.content.Context, profiles: List<SavedBattleProfile>) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        val json = kotlinx.serialization.json.Json.encodeToString(profiles)
+        prefs.edit().putString(KEY_PROFILES, json).apply()
+    }
+
+    fun loadProfiles(context: android.content.Context): List<SavedBattleProfile> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        val json = prefs.getString(KEY_PROFILES, null) ?: return emptyList()
+        return try {
+            kotlinx.serialization.json.Json.decodeFromString<List<SavedBattleProfile>>(json)
+        } catch (e: Exception) {
+            emptyList()
         }
     }
 }
