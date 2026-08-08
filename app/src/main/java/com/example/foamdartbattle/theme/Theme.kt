@@ -1,50 +1,72 @@
 package com.example.foamdartbattle.theme
 
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
 
-private val DarkColorScheme = darkColorScheme(primary = Purple80, secondary = PurpleGrey80, tertiary = Pink80)
+enum class GameTheme {
+    CYBERPUNK,
+    TACTICAL,
+    PLAYFUL
+}
 
-private val LightColorScheme =
-  lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40,
+private val CyberpunkColorScheme = darkColorScheme(
+    primary = CyberpunkPrimary,
+    secondary = CyberpunkSecondary,
+    tertiary = CyberpunkTertiary,
+    background = CyberpunkBackground,
+    surface = CyberpunkSurface,
+    onPrimary = CyberpunkBackground,
+    onSecondary = CyberpunkOnSurface,
+    onTertiary = CyberpunkOnSurface,
+    onBackground = CyberpunkOnBackground,
+    onSurface = CyberpunkOnSurface,
+    surfaceVariant = CyberpunkSurface.copy(alpha = 0.9f)
+)
 
-    /* Other default colors to override
-    background = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
-    */
-  )
+private val TacticalColorScheme = darkColorScheme(
+    primary = TacticalPrimary,
+    secondary = TacticalSecondary,
+    tertiary = TacticalTertiary,
+    background = TacticalBackground,
+    surface = TacticalSurface,
+    onPrimary = TacticalBackground,
+    onSecondary = TacticalOnSurface,
+    onTertiary = TacticalOnSurface,
+    onBackground = TacticalOnBackground,
+    onSurface = TacticalOnSurface,
+    surfaceVariant = TacticalSurface.copy(alpha = 0.9f)
+)
+
+private val PlayfulColorScheme = lightColorScheme(
+    primary = PlayfulPrimary,
+    secondary = PlayfulSecondary,
+    tertiary = PlayfulTertiary,
+    background = PlayfulBackground,
+    surface = PlayfulSurface,
+    onPrimary = PlayfulBackground,
+    onSecondary = PlayfulOnSurface,
+    onTertiary = PlayfulOnSurface,
+    onBackground = PlayfulOnBackground,
+    onSurface = PlayfulOnSurface,
+    surfaceVariant = PlayfulSurface.copy(alpha = 0.9f)
+)
 
 @Composable
 fun FoamDartBattleTheme(
-  darkTheme: Boolean = isSystemInDarkTheme(),
-  // Dynamic color is available on Android 12+
-  dynamicColor: Boolean = true,
-  content: @Composable () -> Unit,
+    theme: GameTheme = GameTheme.CYBERPUNK,
+    content: @Composable () -> Unit,
 ) {
-  val colorScheme =
-    when {
-      dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-        val context = LocalContext.current
-        if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-      }
-      darkTheme -> DarkColorScheme
-      else -> LightColorScheme
+    val colorScheme = when (theme) {
+        GameTheme.CYBERPUNK -> CyberpunkColorScheme
+        GameTheme.TACTICAL -> TacticalColorScheme
+        GameTheme.PLAYFUL -> PlayfulColorScheme
     }
 
-  MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
+    MaterialTheme(
+        colorScheme = colorScheme,
+        typography = Typography,
+        content = content
+    )
 }
