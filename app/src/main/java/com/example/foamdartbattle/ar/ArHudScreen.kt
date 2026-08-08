@@ -46,6 +46,103 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import kotlin.math.roundToInt
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.input.pointer.pointerInput
+import com.example.foamdartbattle.data.HudPreferencesManager
+import com.example.foamdartbattle.data.HudElementState
+
+@Composable
+fun ModularHudElement(
+    modifier: Modifier = Modifier,
+    state: HudElementState,
+    isEditMode: Boolean,
+    onStateChange: (HudElementState) -> Unit,
+    onLongPress: () -> Unit,
+    onReset: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    val currentState by rememberUpdatedState(state)
+    val currentOnStateChange by rememberUpdatedState(onStateChange)
+    val currentOnLongPress by rememberUpdatedState(onLongPress)
+    val currentOnReset by rememberUpdatedState(onReset)
+
+    Box(
+        modifier = modifier
+            .offset { IntOffset(state.xOffset.roundToInt(), state.yOffset.roundToInt()) }
+            .graphicsLayer(
+                scaleX = state.scale,
+                scaleY = state.scale
+            )
+            .pointerInput(isEditMode) {
+                if (isEditMode) {
+                    detectTapGestures(
+                        onDoubleTap = { currentOnReset() }
+                    )
+                } else {
+                    detectTapGestures(
+                        onLongPress = { currentOnLongPress() }
+                    )
+                }
+            }
+            .pointerInput(isEditMode) {
+                if (isEditMode) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        val newScale = (currentState.scale * zoom).coerceIn(0.5f, 3.0f)
+                        val newX = currentState.xOffset + pan.x
+                        val newY = currentState.yOffset + pan.y
+                        currentOnStateChange(
+                            HudElementState(
+                                xOffset = newX,
+                                yOffset = newY,
+                                scale = newScale
+                            )
+                        )
+                    }
+                }
+            }
+            .then(
+                if (isEditMode) {
+                    Modifier
+                        .border(
+                            width = 1.5.dp,
+                            color = Color.Red.copy(alpha = 0.8f),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .background(Color.Red.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                } else {
+                    Modifier
+                }
+            )
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(4.dp)
+        ) {
+            content()
+            if (isEditMode) {
+                Box(
+                    modifier = Modifier
+                        .background(Color.Red.copy(alpha = 0.85f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Double-tap\nto reset",
+                        color = Color.White,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 10.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
 fun ArHudScreen(
@@ -65,15 +162,33 @@ fun ArHudScreen(
         )
     }
 
+    var hasLocationPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         hasCameraPermission = isGranted
     }
 
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasLocationPermission = isGranted
+    }
+
     LaunchedEffect(Unit) {
         if (!hasCameraPermission) {
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+        if (!hasLocationPermission) {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
         }
     }
 
@@ -184,7 +299,50 @@ fun ArHudScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    val prefsManager = remember(context) { HudPreferencesManager(context) }
+    var isEditMode by remember { mutableStateOf(false) }
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .then(
+                if (isEditMode) {
+                    Modifier.pointerInput(Unit) {
+                        detectTapGestures {
+                            isEditMode = false
+                        }
+                    }
+                } else {
+                    Modifier
+                }
+            )
+    ) {
+        val screenWidth = constraints.maxWidth.toFloat()
+        val screenHeight = constraints.maxHeight.toFloat()
+        
+        // Default positions in pixels
+        val defaultRoundX = screenWidth * 0.12f
+        val defaultHealthX = screenWidth * 0.42f
+        val defaultTimeX = screenWidth * 0.72f
+        val defaultMinimapX = screenWidth - 360f
+        val defaultMinimapY = 250f
+        val defaultY = 250f
+
+        var healthLayout by remember(screenWidth) { mutableStateOf(prefsManager.getElementState("health", defaultHealthX, defaultY)) }
+        var roundLayout by remember(screenWidth) { mutableStateOf(prefsManager.getElementState("round", defaultRoundX, defaultY)) }
+        var timeLayout by remember(screenWidth) { mutableStateOf(prefsManager.getElementState("time", defaultTimeX, defaultY)) }
+        var minimapLayout by remember(screenWidth) { mutableStateOf(prefsManager.getElementState("minimap", defaultMinimapX, defaultMinimapY)) }
+
+        // Save layout whenever edit mode is disabled
+        LaunchedEffect(isEditMode) {
+            if (!isEditMode) {
+                prefsManager.saveElementState("health", healthLayout)
+                prefsManager.saveElementState("round", roundLayout)
+                prefsManager.saveElementState("time", timeLayout)
+                prefsManager.saveElementState("minimap", minimapLayout)
+            }
+        }
+
         if (hasCameraPermission) {
             // Live Camera Preview using CameraX
             AndroidView(
@@ -409,7 +567,7 @@ fun ArHudScreen(
                 modifier = Modifier
                     .padding(top = 16.dp, start = 24.dp, end = 24.dp)
                     .fillMaxWidth()
-                    .height(65.dp)
+                    .height(78.dp)
                     .background(
                         color = Color.Black.copy(alpha = 0.5f),
                         shape = RoundedCornerShape(8.dp)
@@ -441,7 +599,7 @@ fun ArHudScreen(
             Text(
                 text = currentHeadingText,
                 color = primaryColor,
-                fontSize = 13.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
@@ -462,7 +620,7 @@ fun ArHudScreen(
                     color = primaryColor.copy(alpha = 0.4f),
                     start = Offset(15f, scaleY),
                     end = Offset(width - 15f, scaleY),
-                    strokeWidth = 2f
+                    strokeWidth = 2.4f
                 )
 
                 val visibleDegrees = 120f // Panoramic Field of view of the compass scale (120 degrees total, 60 on each side)
@@ -477,9 +635,9 @@ fun ArHudScreen(
                         
                         // Determine tick height and color
                         val tickHeight = when {
-                            marker.isCardinal -> 10f
-                            marker.isMajor -> 7f
-                            else -> 4f
+                            marker.isCardinal -> 12f
+                            marker.isMajor -> 8.4f
+                            else -> 4.8f
                         }
                         
                         val tickColor = if (marker.isCardinal) {
@@ -493,14 +651,14 @@ fun ArHudScreen(
                             color = tickColor,
                             start = Offset(x, scaleY),
                             end = Offset(x, scaleY - tickHeight),
-                            strokeWidth = if (marker.isCardinal) 3.5f else 1.5f
+                            strokeWidth = if (marker.isCardinal) 4.2f else 1.8f
                         )
 
                         // Draw label text above the tick
                         if (marker.label.isNotEmpty()) {
                             val textStyle = TextStyle(
                                 color = if (marker.isCardinal) Color.White else primaryColor.copy(alpha = 0.8f),
-                                fontSize = if (marker.isCardinal) 10.sp else 8.sp,
+                                fontSize = if (marker.isCardinal) 12.sp else 9.6.sp,
                                 fontWeight = if (marker.isCardinal) FontWeight.Bold else FontWeight.Normal
                             )
                             val textLayoutResult = textMeasurer.measure(
@@ -522,8 +680,8 @@ fun ArHudScreen(
                 // --- Center Pointer / Indicator ---
                 val pointerPath = Path().apply {
                     moveTo(centerX, scaleY - 2f)
-                    lineTo(centerX - 6f, scaleY - 12f)
-                    lineTo(centerX + 6f, scaleY - 12f)
+                    lineTo(centerX - 7.2f, scaleY - 14.4f)
+                    lineTo(centerX + 7.2f, scaleY - 14.4f)
                     close()
                 }
                 
@@ -531,8 +689,8 @@ fun ArHudScreen(
                 drawLine(
                     color = Color.Red.copy(alpha = 0.5f),
                     start = Offset(centerX, scaleY),
-                    end = Offset(centerX, scaleY - 14f),
-                    strokeWidth = 2f
+                    end = Offset(centerX, scaleY - 16.8f),
+                    strokeWidth = 2.4f
                 )
 
                 drawPath(
@@ -542,90 +700,178 @@ fun ArHudScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+    } // End of TOP HUD CONTAINER Column
 
-        // --- TOP RESPONSIVE HEADER ROW (STATS & MINIMAP) ---
-        Row(
+        // --- BOTTOM NAVIGATION CONTROLS (Centering Map View Link) ---
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 32.dp)
         ) {
-            if (gameState.isGameActive) {
-                Card(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 8.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f))
+            Button(
+                onClick = onToggleMapView,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            ) {
+                Text("Map View")
+            }
+        }
+
+        // --- MODULAR HUD ELEMENTS (HEALTH, ROUND, TIME) ---
+        ModularHudElement(
+            state = healthLayout,
+            isEditMode = isEditMode,
+            onStateChange = { healthLayout = it },
+            onLongPress = { isEditMode = true },
+            onReset = {
+                healthLayout = HudElementState(defaultHealthX, defaultY, 1.0f)
+                prefsManager.saveElementState("health", healthLayout)
+            }
+        ) {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = if (gameState.isEliminated) "ELIMINATED" else "HP",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (gameState.isEliminated) Color.Red else primaryColor
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "${gameState.playerHealth}%",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (gameState.playerHealth < 30) Color.Red else primaryColor
+                    )
+                }
+            }
+        }
+
+        ModularHudElement(
+            state = roundLayout,
+            isEditMode = isEditMode,
+            onStateChange = { roundLayout = it },
+            onLongPress = { isEditMode = true },
+            onReset = {
+                roundLayout = HudElementState(defaultRoundX, defaultY, 1.0f)
+                prefsManager.saveElementState("round", roundLayout)
+            }
+        ) {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "ROUND",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = onSurfaceColor.copy(alpha = 0.6f)
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "${gameState.currentRound}/${gameState.settings.maxRounds}",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = onSurfaceColor
+                    )
+                }
+            }
+        }
+
+        ModularHudElement(
+            state = timeLayout,
+            isEditMode = isEditMode,
+            onStateChange = { timeLayout = it },
+            onLongPress = { isEditMode = true },
+            onReset = {
+                timeLayout = HudElementState(defaultTimeX, defaultY, 1.0f)
+                prefsManager.saveElementState("time", timeLayout)
+            }
+        ) {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f))
                 ) {
                     Column(
                         modifier = Modifier.padding(12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        val phaseLabel = if (gameState.currentPhase == GamePhase.PREP) "Prep" else "Shrink"
                         Text(
-                            text = if (gameState.isEliminated) "ELIMINATED" else "SYSTEMS ACTIVE",
-                            fontSize = 11.sp,
+                            text = phaseLabel.uppercase(),
+                            fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (gameState.isEliminated) Color.Red else primaryColor
+                            color = onSurfaceColor.copy(alpha = 0.6f)
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("Round", fontSize = 8.sp, color = onSurfaceColor.copy(alpha = 0.6f))
-                                Text("${gameState.currentRound}/${gameState.settings.maxRounds}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = onSurfaceColor)
-                            }
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("HP", fontSize = 8.sp, color = onSurfaceColor.copy(alpha = 0.6f))
-                                Text("${gameState.playerHealth}%", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (gameState.playerHealth < 30) Color.Red else primaryColor)
-                            }
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                val phaseLabel = if (gameState.currentPhase == GamePhase.PREP) "Prep" else "Shrink"
-                                Text(phaseLabel, fontSize = 8.sp, color = onSurfaceColor.copy(alpha = 0.6f))
-                                Text("${gameState.phaseTimeLeftSeconds}s", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (gameState.currentPhase == GamePhase.SHRINK) Color.Red else primaryColor)
-                            }
-                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "${gameState.phaseTimeLeftSeconds}s",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (gameState.currentPhase == GamePhase.SHRINK) Color.Red else primaryColor
+                        )
                     }
                 }
             }
 
-            if (gameState.isGameActive && gameState.zoneCenter != null) {
-                Box(
-                    modifier = Modifier
-                        .size(120.dp)
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
-                        .padding(2.dp)
-                ) {
-                    val minimapCameraPositionState = rememberCameraPositionState {
-                        position = CameraPosition.fromLatLngZoom(gameState.zoneCenter!!, 17f)
-                    }
+        ModularHudElement(
+            state = minimapLayout,
+            isEditMode = isEditMode,
+            onStateChange = { minimapLayout = it },
+            onLongPress = { isEditMode = true },
+            onReset = {
+                minimapLayout = HudElementState(defaultMinimapX, defaultMinimapY, 1.0f)
+                prefsManager.saveElementState("minimap", minimapLayout)
+            }
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(120.dp)
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                    .padding(2.dp)
+            ) {
+                val minimapCenter = gameState.playerLocation ?: gameState.zoneCenter ?: LatLng(37.4220, -122.0840)
+                val minimapCameraPositionState = rememberCameraPositionState {
+                    position = CameraPosition.fromLatLngZoom(minimapCenter, 16.5f)
+                }
 
-                    // Smoothly center and zoom the minimap camera onto the shifting active zone
-                    LaunchedEffect(gameState.zoneCenter, gameState.currentZoneRadius) {
+                // Smoothly center the minimap camera on the player or zone center
+                LaunchedEffect(minimapCenter, gameState.currentZoneRadius, gameState.isGameActive) {
+                    val zoom = if (gameState.isGameActive && gameState.currentZoneRadius > 0f) {
                         val radius = gameState.currentZoneRadius
-                        // Custom scale zoom for minimap viewport size
-                        val zoom = (22.5f - (Math.log(radius.toDouble()) / Math.log(2.0))).toFloat().coerceIn(12f, 19f)
-                        minimapCameraPositionState.position = CameraPosition.fromLatLngZoom(gameState.zoneCenter!!, zoom)
+                        (22.5f - (Math.log(radius.toDouble()) / Math.log(2.0))).toFloat().coerceIn(12f, 19f)
+                    } else {
+                        16.5f
                     }
+                    minimapCameraPositionState.position = CameraPosition.fromLatLngZoom(minimapCenter, zoom)
+                }
 
-                    GoogleMap(
-                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
-                        cameraPositionState = minimapCameraPositionState,
-                        properties = MapProperties(isMyLocationEnabled = hasCameraPermission),
-                        uiSettings = MapUiSettings(
-                            zoomControlsEnabled = false,
-                            zoomGesturesEnabled = false,
-                            scrollGesturesEnabled = false,
-                            tiltGesturesEnabled = false,
-                            rotationGesturesEnabled = false,
-                            myLocationButtonEnabled = false
-                        )
-                    ) {
+                GoogleMap(
+                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
+                    cameraPositionState = minimapCameraPositionState,
+                    properties = MapProperties(isMyLocationEnabled = hasLocationPermission),
+                    uiSettings = MapUiSettings(
+                        zoomControlsEnabled = false,
+                        zoomGesturesEnabled = false,
+                        scrollGesturesEnabled = false,
+                        tiltGesturesEnabled = false,
+                        rotationGesturesEnabled = false,
+                        myLocationButtonEnabled = false
+                    )
+                ) {
+                    if (gameState.isGameActive) {
                         // 1. Damage Zone (Red) - active shrinking storm border
                         if (gameState.zoneCenter != null) {
                             Circle(
@@ -662,22 +908,60 @@ fun ArHudScreen(
                 }
             }
         }
-    } // End of TOP HUD CONTAINER Column
 
-        // --- BOTTOM NAVIGATION CONTROLS (Centering Map View Link) ---
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 32.dp)
-        ) {
-            Button(
-                onClick = onToggleMapView,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                )
+        // --- HUD EDIT MODE BANNER OVERLAY ---
+        if (isEditMode) {
+            Box(
+                modifier = Modifier
+                    .padding(top = 16.dp, start = 16.dp, end = 16.dp)
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter)
+                    .background(Color.Black.copy(alpha = 0.85f), RoundedCornerShape(12.dp))
+                    .border(1.dp, Color.Red.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Text("Map View")
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "HUD EDIT MODE ACTIVE",
+                        color = Color.Red,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "• Drag elements to reposition\n• Pinch with two fingers to resize\n• Tap background or click 'Done' to save",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Button(
+                            onClick = {
+                                healthLayout = HudElementState(defaultHealthX, defaultY, 1.0f)
+                                roundLayout = HudElementState(defaultRoundX, defaultY, 1.0f)
+                                timeLayout = HudElementState(defaultTimeX, defaultY, 1.0f)
+                                minimapLayout = HudElementState(defaultMinimapX, defaultMinimapY, 1.0f)
+                                prefsManager.clearAll()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("Reset Layout")
+                        }
+                        Button(
+                            onClick = {
+                                isEditMode = false
+                                prefsManager.saveElementState("health", healthLayout)
+                                prefsManager.saveElementState("round", roundLayout)
+                                prefsManager.saveElementState("time", timeLayout)
+                                prefsManager.saveElementState("minimap", minimapLayout)
+                            }
+                        ) {
+                            Text("Done")
+                        }
+                    }
+                }
             }
         }
 
