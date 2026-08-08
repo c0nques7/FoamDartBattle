@@ -224,6 +224,132 @@ fun ArHudScreen(
             }
         }
 
+        // --- AR FORCEFIELD WALLS LAYER ---
+        if (gameState.playerLocation != null) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val screenWidth = size.width
+                val screenHeight = size.height
+
+                fun drawForcefieldWall(
+                    wallPoints: List<ArForcefieldUtils.WallPoint>,
+                    color: Color,
+                    drawGrid: Boolean = false
+                ) {
+                    if (wallPoints.size < 2) return
+
+                    // Draw a continuous semi-transparent filled forcefield mesh polygon
+                    val path = Path().apply {
+                        moveTo(wallPoints[0].x, wallPoints[0].yTop)
+                        for (i in 1 until wallPoints.size) {
+                            lineTo(wallPoints[i].x, wallPoints[i].yTop)
+                        }
+                        for (i in wallPoints.indices.reversed()) {
+                            lineTo(wallPoints[i].x, wallPoints[i].yBottom)
+                        }
+                        close()
+                    }
+                    drawPath(path = path, color = color)
+
+                    // Draw top and bottom glowing border lines for the wall
+                    for (i in 0 until wallPoints.size - 1) {
+                        val pt1 = wallPoints[i]
+                        val pt2 = wallPoints[i + 1]
+
+                        // Top glowing line
+                        drawLine(
+                            color = color.copy(alpha = 0.8f),
+                            start = Offset(pt1.x, pt1.yTop),
+                            end = Offset(pt2.x, pt2.yTop),
+                            strokeWidth = 3.5f
+                        )
+                        // Bottom glowing line
+                        drawLine(
+                            color = color.copy(alpha = 0.8f),
+                            start = Offset(pt1.x, pt1.yBottom),
+                            end = Offset(pt2.x, pt2.yBottom),
+                            strokeWidth = 3.5f
+                        )
+
+                        // Technical cage grid for towering Damage/Danger Zone
+                        if (drawGrid) {
+                            // Vertical cage bar
+                            drawLine(
+                                color = color.copy(alpha = 0.4f),
+                                start = Offset(pt1.x, pt1.yTop),
+                                end = Offset(pt1.x, pt1.yBottom),
+                                strokeWidth = 1.5f
+                            )
+                            // Middle horizontal divider line
+                            val midY1 = (pt1.yTop + pt1.yBottom) / 2f
+                            val midY2 = (pt2.yTop + pt2.yBottom) / 2f
+                            drawLine(
+                                color = color.copy(alpha = 0.5f),
+                                start = Offset(pt1.x, midY1),
+                                end = Offset(pt2.x, midY2),
+                                strokeWidth = 1.5f
+                            )
+                        }
+                    }
+
+                    // Last vertical cage bar
+                    if (drawGrid && wallPoints.isNotEmpty()) {
+                        val last = wallPoints.last()
+                        drawLine(
+                            color = color.copy(alpha = 0.4f),
+                            start = Offset(last.x, last.yTop),
+                            end = Offset(last.x, last.yBottom),
+                            strokeWidth = 1.5f
+                        )
+                    }
+                }
+
+                // 1. Draw Preview Zone (Green) - 12ft tall (3.66m)
+                if (gameState.settings.showNextRing && gameState.previewZoneCenter != null && gameState.previewZoneRadius > 0f) {
+                    val perimeter = ArForcefieldUtils.generateZonePerimeter(gameState.previewZoneCenter!!, gameState.previewZoneRadius)
+                    val projected = ArForcefieldUtils.projectWallPoints(
+                        playerLoc = gameState.playerLocation!!,
+                        heading = headingDegrees,
+                        perimeter = perimeter,
+                        fovDegrees = 70f,
+                        screenWidth = screenWidth,
+                        screenHeight = screenHeight,
+                        physicalHeightMeters = 3.66f // 12 feet tall
+                    )
+                    drawForcefieldWall(projected, Color.Green.copy(alpha = 0.12f), drawGrid = false)
+                }
+
+                // 2. Draw Next Safe Zone (White) - 20ft tall (6.10m)
+                if (gameState.nextZoneCenter != null && gameState.nextZoneRadius > 0f) {
+                    val perimeter = ArForcefieldUtils.generateZonePerimeter(gameState.nextZoneCenter!!, gameState.nextZoneRadius)
+                    val projected = ArForcefieldUtils.projectWallPoints(
+                        playerLoc = gameState.playerLocation!!,
+                        heading = headingDegrees,
+                        perimeter = perimeter,
+                        fovDegrees = 70f,
+                        screenWidth = screenWidth,
+                        screenHeight = screenHeight,
+                        physicalHeightMeters = 6.10f // 20 feet tall
+                    )
+                    drawForcefieldWall(projected, Color.White.copy(alpha = 0.18f), drawGrid = false)
+                }
+
+                // 3. Draw Current Danger Zone (Red) - 40ft tall (12.19m) with Technical Grid
+                if (gameState.zoneCenter != null && gameState.currentZoneRadius > 0f) {
+                    val perimeter = ArForcefieldUtils.generateZonePerimeter(gameState.zoneCenter!!, gameState.currentZoneRadius)
+                    val projected = ArForcefieldUtils.projectWallPoints(
+                        playerLoc = gameState.playerLocation!!,
+                        heading = headingDegrees,
+                        perimeter = perimeter,
+                        fovDegrees = 70f,
+                        screenWidth = screenWidth,
+                        screenHeight = screenHeight,
+                        physicalHeightMeters = 12.19f // 40 feet tall (precise!)
+                    )
+                    drawForcefieldWall(projected, Color.Red.copy(alpha = 0.28f), drawGrid = true)
+                }
+            }
+        }
+
         val primaryColor = MaterialTheme.colorScheme.primary
         val onSurfaceColor = MaterialTheme.colorScheme.onSurface
 
