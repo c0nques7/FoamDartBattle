@@ -9,13 +9,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -40,6 +43,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun MapScreen(
     gameViewModel: GameViewModel = viewModel(),
+    currentTheme: com.example.foamdartbattle.theme.GameTheme = com.example.foamdartbattle.theme.GameTheme.CYBERPUNK,
+    onThemeChanged: (com.example.foamdartbattle.theme.GameTheme) -> Unit = {},
     onToggleArView: () -> Unit = {},
     onGeofenceDefined: (List<LatLng>) -> Unit = {}
 ) {
@@ -135,6 +140,11 @@ fun MapScreen(
     }
 
     var isMapLocked by remember { mutableStateOf(true) }
+    var isMenuExpanded by rememberSaveable { mutableStateOf(true) }
+    var menuEdge by rememberSaveable { mutableStateOf(MenuEdge.LEFT) }
+    var activeDrawMode by rememberSaveable { mutableStateOf(DrawMode.TAP_POINTS) }
+    var boxStartPoint by remember { mutableStateOf<Offset?>(null) }
+    var boxEndPoint by remember { mutableStateOf<Offset?>(null) }
 
     LaunchedEffect(gameState.isGameActive, gameState.zoneCenter, gameState.currentZoneRadius, isMapLocked) {
         if (gameState.isGameActive && isMapLocked && gameState.zoneCenter != null) {
@@ -159,7 +169,7 @@ fun MapScreen(
                 properties = MapProperties(isMyLocationEnabled = hasLocationPermission),
                 onMapClick = { latLng ->
                     android.util.Log.d("MapScreen", "onMapClick triggered: $latLng")
-                    if (!gameState.isGameActive) {
+                    if (!gameState.isGameActive && activeDrawMode == DrawMode.TAP_POINTS) {
                         polygonPoints = polygonPoints + latLng
                         Toast.makeText(context, "Boundary point added!", Toast.LENGTH_SHORT).show()
                     }
@@ -203,10 +213,23 @@ fun MapScreen(
 
                 // If game is not active, show the points placed by user
                 if (!gameState.isGameActive) {
-                    polygonPoints.forEach { point ->
+                    polygonPoints.forEachIndexed { index, point ->
+                        val markerState = rememberMarkerState(key = index.toString(), position = point)
+                        
+                        var wasDragging by remember { mutableStateOf(false) }
+                        LaunchedEffect(markerState.isDragging) {
+                            if (wasDragging && !markerState.isDragging) {
+                                val newPoints = polygonPoints.toMutableList()
+                                newPoints[index] = markerState.position
+                                polygonPoints = newPoints
+                            }
+                            wasDragging = markerState.isDragging
+                        }
+
                         Marker(
-                            state = rememberMarkerState(key = point.toString(), position = point),
-                            title = "Geofence Point"
+                            state = markerState,
+                            title = "Geofence Point ${index + 1}",
+                            draggable = true
                         )
                     }
 
@@ -219,13 +242,89 @@ fun MapScreen(
                     }
                 }
             }
+
+            // --- BOX DRAW GESTURE OVERLAY ---
+            if (!gameState.isGameActive && activeDrawMode == DrawMode.BOX_DRAW) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(cameraPositionState) {
+                            detectDragGestures(
+                                onDragStart = { startOffset ->
+                                    boxStartPoint = startOffset
+                                    boxEndPoint = startOffset
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    boxEndPoint = (boxEndPoint ?: change.position) + dragAmount
+                                },
+                                onDragEnd = {
+                                    val start = boxStartPoint
+                                    val end = boxEndPoint
+                                    if (start != null && end != null) {
+                                        val proj = cameraPositionState.projection
+                                        if (proj != null) {
+                                            val p1 = proj.fromScreenLocation(android.graphics.Point(start.x.toInt(), start.y.toInt()))
+                                            val p2 = proj.fromScreenLocation(android.graphics.Point(end.x.toInt(), end.y.toInt()))
+                                            if (p1 != null && p2 != null) {
+                                                val left = minOf(p1.latitude, p2.latitude)
+                                                val right = maxOf(p1.latitude, p2.latitude)
+                                                val bottom = minOf(p1.longitude, p2.longitude)
+                                                val top = maxOf(p1.longitude, p2.longitude)
+                                                
+                                                polygonPoints = listOf(
+                                                    LatLng(left, bottom),
+                                                    LatLng(right, bottom),
+                                                    LatLng(right, top),
+                                                    LatLng(left, top)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    boxStartPoint = null
+                                    boxEndPoint = null
+                                },
+                                onDragCancel = {
+                                    boxStartPoint = null
+                                    boxEndPoint = null
+                                }
+                            )
+                        }
+                ) {
+                    if (boxStartPoint != null && boxEndPoint != null) {
+                        val start = boxStartPoint!!
+                        val end = boxEndPoint!!
+                        
+                        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                            val left = minOf(start.x, end.x)
+                            val top = minOf(start.y, end.y)
+                            val right = maxOf(start.x, end.x)
+                            val bottom = maxOf(start.y, end.y)
+                            
+                            drawRect(
+                                color = Color.Blue.copy(alpha = 0.2f),
+                                topLeft = Offset(left, top),
+                                size = androidx.compose.ui.geometry.Size(right - left, bottom - top)
+                            )
+                            drawRect(
+                                color = Color.Blue,
+                                topLeft = Offset(left, top),
+                                size = androidx.compose.ui.geometry.Size(right - left, bottom - top),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 4f)
+                            )
+                        }
+                    }
+                }
+            }
             
             // --- TOP GAME STATUS BAR & LEFT CONTROL PANEL ---
             if (gameState.isGameActive) {
                 val phaseColor = when (gameState.currentPhase) {
-                    GamePhase.PREP -> Color.DarkGray
-                    GamePhase.SHRINK -> Color.Red
+                    GamePhase.PREP -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    GamePhase.SHRINK -> MaterialTheme.colorScheme.error
                 }
+                val labelColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                val valueColor = MaterialTheme.colorScheme.onSurfaceVariant
 
                 // 1. TOP STATUS BAR CARD (Game Data across the top)
                 Card(
@@ -239,159 +338,172 @@ fun MapScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("MATCH STATUS", fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("STATUS", fontSize = 8.sp, color = labelColor, fontWeight = FontWeight.Bold, maxLines = 1)
                             Text(
                                 text = if (gameState.isEliminated) "ELIMINATED" else "ACTIVE",
-                                fontSize = 14.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (gameState.isEliminated) Color.Red else MaterialTheme.colorScheme.primary
+                                color = if (gameState.isEliminated) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                maxLines = 1
                             )
                         }
                         
-                        Box(modifier = Modifier.height(24.dp).width(1.dp).background(Color.Gray.copy(alpha = 0.3f)))
+                        Box(modifier = Modifier.height(20.dp).width(1.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)))
 
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("ROUND", fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
-                            Text("${gameState.currentRound}/${gameState.settings.maxRounds}", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("ROUND", fontSize = 8.sp, color = labelColor, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text("${gameState.currentRound}/${gameState.settings.maxRounds}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = valueColor, maxLines = 1)
                         }
 
-                        Box(modifier = Modifier.height(24.dp).width(1.dp).background(Color.Gray.copy(alpha = 0.3f)))
+                        Box(modifier = Modifier.height(20.dp).width(1.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)))
 
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("HP STATUS", fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("HP STATUS", fontSize = 8.sp, color = labelColor, fontWeight = FontWeight.Bold, maxLines = 1)
                             Text(
                                 "${gameState.playerHealth}%",
-                                fontSize = 14.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (gameState.playerHealth < 30) Color.Red else Color.Unspecified
+                                color = if (gameState.playerHealth < 30) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                maxLines = 1
                             )
                         }
 
-                        Box(modifier = Modifier.height(24.dp).width(1.dp).background(Color.Gray.copy(alpha = 0.3f)))
+                        Box(modifier = Modifier.height(20.dp).width(1.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)))
 
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            val phaseLabel = if (gameState.currentPhase == GamePhase.PREP) "ZONE STEADY" else "ZONE SHRINKING"
-                            Text(phaseLabel, fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
-                            Text("${gameState.phaseTimeLeftSeconds}s", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = phaseColor)
+                        Column(modifier = Modifier.weight(1.2f), horizontalAlignment = Alignment.CenterHorizontally) {
+                            val phaseLabel = if (gameState.currentPhase == GamePhase.PREP) "ZONE STEADY" else "SHRINKING"
+                            Text(phaseLabel, fontSize = 8.sp, color = labelColor, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text("${gameState.phaseTimeLeftSeconds}s", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = phaseColor, maxLines = 1)
                         }
 
-                        Box(modifier = Modifier.height(24.dp).width(1.dp).background(Color.Gray.copy(alpha = 0.3f)))
+                        Box(modifier = Modifier.height(20.dp).width(1.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)))
 
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("TOTAL TIME", fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
-                            Text("${gameState.totalTimeSeconds}s", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("TOTAL TIME", fontSize = 8.sp, color = labelColor, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text("${gameState.totalTimeSeconds}s", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = valueColor, maxLines = 1)
                         }
-                    }
-                }
-
-                // 2. LEFT CONTROL PANEL CARD (Buttons on the left side)
-                Card(
-                    modifier = Modifier
-                        .width(160.dp)
-                        .padding(start = 16.dp, bottom = 16.dp)
-                        .align(Alignment.BottomStart),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f))
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text("CONTROLS", fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
-                        
-                        Button(
-                            onClick = { isMapLocked = !isMapLocked },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isMapLocked) Color.DarkGray else MaterialTheme.colorScheme.tertiary
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
-                        ) {
-                            Text(if (isMapLocked) "🔓 Unlock" else "🔒 Lock", fontSize = 12.sp)
-                        }
-
-                        Button(
-                            onClick = onToggleArView,
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                            modifier = Modifier.fillMaxWidth(),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
-                        ) {
-                            Text("AR HUD", fontSize = 12.sp)
-                        }
-
-                        // Press and Hold End Match Button (consensus voting)
-                        LongPressButton(
-                            text = "End (Hold)",
-                            onComplete = { gameViewModel.initiateEndGameVote(context) },
-                            color = Color.Red,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        // Press and Hold Leave Match Button (individual exit/abandon)
-                        LongPressButton(
-                            text = "Leave (Hold)",
-                            onComplete = { gameViewModel.leaveMatch(context) },
-                            color = Color.DarkGray,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-            } else {
-                // Setup UI when game is inactive
-                if (polygonPoints.size >= 3) {
-                    Button(
-                        onClick = {
-                            val dummyGeofenceManager = com.example.foamdartbattle.geofence.GeofenceManager(context)
-                            val center = dummyGeofenceManager.calculateCenter(polygonPoints)
-                            val safeRadius = dummyGeofenceManager.calculateRadius(center, polygonPoints)
-                            val damageRadius = dummyGeofenceManager.calculateCircumscribedRadius(center, polygonPoints)
-
-                            gameViewModel.startGame(context, center, safeRadius, damageRadius, currentSettings)
-                            polygonPoints = emptyList()
-                            Toast.makeText(context, "Battle Royale Started!", Toast.LENGTH_SHORT).show()
-                        },
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 32.dp)
-                    ) {
-                        Text("Start Battle Royale")
-                    }
-                }
-                
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Developer Mode settings button
-                    Button(
-                        onClick = { showSettingsSheet = true },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                        ),
-                        modifier = Modifier.padding(end = 8.dp)
-                    ) {
-                        Text("Dev Mode")
-                    }
-
-                    Button(
-                        onClick = { polygonPoints = emptyList() }
-                    ) {
-                        Text("Clear")
                     }
                 }
             }
 
-            // Developer Settings Bottom Sheet
+            val labelColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+
+            // --- EDGE-POSITIONABLE SIDEBAR MENU (COLLAPSED STATE) ---
+            if (!isMenuExpanded) {
+                val alignment = when (menuEdge) {
+                    MenuEdge.LEFT -> Alignment.CenterStart
+                    MenuEdge.RIGHT -> Alignment.CenterEnd
+                }
+                val padding = Modifier.padding(16.dp)
+
+                FloatingActionButton(
+                    onClick = { isMenuExpanded = true },
+                    modifier = padding.align(alignment),
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ) {
+                    val iconText = when (menuEdge) {
+                        MenuEdge.LEFT -> "▶ Controls"
+                        MenuEdge.RIGHT -> "Controls ◀"
+                    }
+                    Text(iconText, modifier = Modifier.padding(horizontal = 12.dp), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            // --- EDGE-POSITIONABLE SIDEBAR MENU (EXPANDED STATE) ---
+            if (isMenuExpanded) {
+                // Adjust alignment and sizing to dock flat against screen boundary edges
+                val modifier = when (menuEdge) {
+                    MenuEdge.LEFT -> Modifier
+                        .width(150.dp)
+                        .fillMaxHeight()
+                        .padding(top = if (gameState.isGameActive) 80.dp else 0.dp)
+                        .align(Alignment.CenterStart)
+                    MenuEdge.RIGHT -> Modifier
+                        .width(150.dp)
+                        .fillMaxHeight()
+                        .padding(top = if (gameState.isGameActive) 80.dp else 0.dp)
+                        .align(Alignment.CenterEnd)
+                }
+
+                val shape = when (menuEdge) {
+                    MenuEdge.LEFT -> RoundedCornerShape(topEnd = 16.dp, bottomEnd = 16.dp)
+                    MenuEdge.RIGHT -> RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp)
+                }
+
+                Card(
+                    modifier = modifier,
+                    shape = shape,
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+                ) {
+                    // Vertical layout
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("MENU", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = labelColor)
+                            IconButton(
+                                onClick = { isMenuExpanded = false },
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Text("✖", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+
+                        // Edge selector
+                        EdgeSelector(
+                            activeEdge = menuEdge,
+                            onEdgeSelected = { menuEdge = it }
+                        )
+
+                        if (!gameState.isGameActive) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+                            DrawModeSelector(
+                                activeMode = activeDrawMode,
+                                onModeSelected = { activeDrawMode = it }
+                            )
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+
+                        // Controls
+                        MenuControls(
+                            isGameActive = gameState.isGameActive,
+                            isMapLocked = isMapLocked,
+                            onToggleMapLock = { isMapLocked = !isMapLocked },
+                            onToggleArView = onToggleArView,
+                            onInitiateEndGameVote = { gameViewModel.initiateEndGameVote(context) },
+                            onLeaveMatch = { gameViewModel.leaveMatch(context) },
+                            onShowSettings = { showSettingsSheet = true },
+                            onClearPoints = { polygonPoints = emptyList() },
+                            hasPoints = polygonPoints.size >= 3,
+                            onStartGame = {
+                                val dummyGeofenceManager = com.example.foamdartbattle.geofence.GeofenceManager(context)
+                                val center = dummyGeofenceManager.calculateCenter(polygonPoints)
+                                val safeRadius = dummyGeofenceManager.calculateRadius(center, polygonPoints)
+                                val damageRadius = dummyGeofenceManager.calculateCircumscribedRadius(center, polygonPoints)
+                                gameViewModel.startGame(context, center, safeRadius, damageRadius, currentSettings)
+                                polygonPoints = emptyList()
+                                Toast.makeText(context, "Battle Royale Started!", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
+                }
+            }
+
+            // Settings Bottom Sheet
             if (showSettingsSheet) {
                 ModalBottomSheet(
                     onDismissRequest = { showSettingsSheet = false }
@@ -402,7 +514,7 @@ fun MapScreen(
                             .padding(horizontal = 24.dp, vertical = 16.dp)
                     ) {
                         Text(
-                            text = "Developer Mode Settings",
+                            text = "Settings",
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(bottom = 16.dp)
@@ -449,6 +561,32 @@ fun MapScreen(
                                 checked = currentSettings.showNextRing,
                                 onCheckedChange = { currentSettings = currentSettings.copy(showNextRing = it) }
                             )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // 5. Theme Selection Customizer Framework
+                        Text("Active Visual Theme Preset", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            com.example.foamdartbattle.theme.GameTheme.values().forEach { themeOption ->
+                                val isSelected = currentTheme == themeOption
+                                Button(
+                                    onClick = { onThemeChanged(themeOption) },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                        contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = themeOption.name.substring(0, 1) + themeOption.name.substring(1).lowercase(),
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(24.dp))
@@ -619,5 +757,176 @@ fun EndGameVoteOverlay(
                 }
             }
         )
+    }
+}
+
+enum class MenuEdge {
+    LEFT, RIGHT
+}
+
+@Composable
+fun EdgeSelector(
+    activeEdge: MenuEdge,
+    onEdgeSelected: (MenuEdge) -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+        Text("POSITION", fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+        Spacer(modifier = Modifier.height(2.dp))
+        Row(
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            MenuEdge.values().forEach { edge ->
+                val isSelected = activeEdge == edge
+                val text = when (edge) {
+                    MenuEdge.LEFT -> "⬅️"
+                    MenuEdge.RIGHT -> "➡️"
+                }
+                IconButton(
+                    onClick = { onEdgeSelected(edge) },
+                    modifier = Modifier
+                        .size(24.dp)
+                        .background(
+                            if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                            else Color.Transparent,
+                            RoundedCornerShape(4.dp)
+                        )
+                ) {
+                    Text(text, fontSize = 11.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MenuControls(
+    isGameActive: Boolean,
+    isMapLocked: Boolean,
+    onToggleMapLock: () -> Unit,
+    onToggleArView: () -> Unit,
+    onInitiateEndGameVote: () -> Unit,
+    onLeaveMatch: () -> Unit,
+    onShowSettings: () -> Unit,
+    onClearPoints: () -> Unit,
+    hasPoints: Boolean,
+    onStartGame: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        if (isGameActive) {
+            Button(
+                onClick = onToggleMapLock,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isMapLocked) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.tertiary,
+                    contentColor = if (isMapLocked) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onTertiary
+                ),
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(vertical = 6.dp)
+            ) {
+                Text(if (isMapLocked) "🔓 Unlock" else "🔒 Lock", fontSize = 11.sp)
+            }
+
+            Button(
+                onClick = onToggleArView,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(vertical = 6.dp)
+            ) {
+                Text("AR HUD", fontSize = 11.sp)
+            }
+
+            LongPressButton(
+                text = "End (Hold)",
+                onComplete = onInitiateEndGameVote,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            LongPressButton(
+                text = "Leave (Hold)",
+                onComplete = onLeaveMatch,
+                color = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else {
+            Button(
+                onClick = onShowSettings,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                ),
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(vertical = 6.dp)
+            ) {
+                Text("Settings", fontSize = 11.sp)
+            }
+
+            Button(
+                onClick = onClearPoints,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(vertical = 6.dp)
+            ) {
+                Text("Clear", fontSize = 11.sp)
+            }
+if (hasPoints) {
+    Button(
+        onClick = onStartGame,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary
+        ),
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(vertical = 6.dp)
+    ) {
+        Text("Start Game", fontSize = 11.sp)
+    }
+}
+}
+}
+}
+
+enum class DrawMode {
+    TAP_POINTS, BOX_DRAW, EXPLORE
+}
+
+@Composable
+fun DrawModeSelector(
+    activeMode: DrawMode,
+    onModeSelected: (DrawMode) -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+        Text("DRAW MODE", fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            DrawMode.values().forEach { mode ->
+                val isSelected = activeMode == mode
+                val text = when (mode) {
+                    DrawMode.TAP_POINTS -> "📍 Points"
+                    DrawMode.BOX_DRAW -> "🟩 Box"
+                    DrawMode.EXPLORE -> "🧭 View"
+                }
+                Button(
+                    onClick = { onModeSelected(mode) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(vertical = 4.dp, horizontal = 1.dp)
+                ) {
+                    Text(text, fontSize = 8.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                }
+            }
+        }
     }
 }

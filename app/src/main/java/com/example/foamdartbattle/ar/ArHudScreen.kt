@@ -118,159 +118,168 @@ fun ArHudScreen(
             }
         }
 
+        val primaryColor = MaterialTheme.colorScheme.primary
+        val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+
         // --- TECHNICAL HUD CANVAS OVERLAY (CROSSHAIR & SENSORS) ---
         Canvas(modifier = Modifier.fillMaxSize()) {
             val center = Offset(size.width / 2f, size.height / 2f)
             
             // 1. Central Tech Crosshair Ring
             drawCircle(
-                color = Color.Cyan,
+                color = primaryColor,
                 radius = 60f,
                 center = center,
                 style = Stroke(width = 3f)
             )
             drawCircle(
-                color = Color.Cyan.copy(alpha = 0.3f),
+                color = primaryColor.copy(alpha = 0.3f),
                 radius = 15f,
                 center = center
             )
             
             // 2. Crosshair Tick Lines (Tech / Sight feel)
             drawLine(
-                color = Color.Cyan,
+                color = primaryColor,
                 start = Offset(center.x - 90f, center.y),
                 end = Offset(center.x - 40f, center.y),
                 strokeWidth = 4f
             )
             drawLine(
-                color = Color.Cyan,
+                color = primaryColor,
                 start = Offset(center.x + 40f, center.y),
                 end = Offset(center.x + 90f, center.y),
                 strokeWidth = 4f
             )
             drawLine(
-                color = Color.Cyan,
+                color = primaryColor,
                 start = Offset(center.x, center.y - 90f),
                 end = Offset(center.x, center.y - 40f),
                 strokeWidth = 4f
             )
             drawLine(
-                color = Color.Cyan,
+                color = primaryColor,
                 start = Offset(center.x, center.y + 40f),
                 end = Offset(center.x, center.y + 90f),
                 strokeWidth = 4f
             )
         }
 
-        // --- TOP LEFT GAME ENGINE STATISTICS ---
-        if (gameState.isGameActive) {
-            Card(
-                modifier = Modifier
-                    .padding(top = 16.dp, start = 16.dp, end = 210.dp) // Leave room on the right for the Minimap!
-                    .align(Alignment.TopStart),
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.7f))
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+        // --- TOP RESPONSIVE HEADER ROW (STATS & MINIMAP) ---
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .align(Alignment.TopCenter),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top
+        ) {
+            if (gameState.isGameActive) {
+                Card(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f))
                 ) {
-                    Text(
-                        text = if (gameState.isEliminated) "ELIMINATED" else "SYSTEMS ACTIVE",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (gameState.isEliminated) Color.Red else Color.Cyan
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Round", fontSize = 9.sp, color = Color.Gray)
-                            Text("${gameState.currentRound}/${gameState.settings.maxRounds}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("HP", fontSize = 9.sp, color = Color.Gray)
-                            Text("${gameState.playerHealth}%", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (gameState.playerHealth < 30) Color.Red else Color.Green)
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            val phaseLabel = if (gameState.currentPhase == GamePhase.PREP) "Prep" else "Shrink"
-                            Text(phaseLabel, fontSize = 9.sp, color = Color.Gray)
-                            Text("${gameState.phaseTimeLeftSeconds}s", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (gameState.currentPhase == GamePhase.SHRINK) Color.Red else Color.White)
+                        Text(
+                            text = if (gameState.isEliminated) "ELIMINATED" else "SYSTEMS ACTIVE",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (gameState.isEliminated) Color.Red else primaryColor
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Round", fontSize = 8.sp, color = onSurfaceColor.copy(alpha = 0.6f))
+                                Text("${gameState.currentRound}/${gameState.settings.maxRounds}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = onSurfaceColor)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("HP", fontSize = 8.sp, color = onSurfaceColor.copy(alpha = 0.6f))
+                                Text("${gameState.playerHealth}%", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (gameState.playerHealth < 30) Color.Red else primaryColor)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                val phaseLabel = if (gameState.currentPhase == GamePhase.PREP) "Prep" else "Shrink"
+                                Text(phaseLabel, fontSize = 8.sp, color = onSurfaceColor.copy(alpha = 0.6f))
+                                Text("${gameState.phaseTimeLeftSeconds}s", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (gameState.currentPhase == GamePhase.SHRINK) Color.Red else primaryColor)
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // --- TOP RIGHT CORNER TRANSPARENT MINIMAP OVERLAY ---
-        if (gameState.isGameActive && gameState.zoneCenter != null) {
-            Box(
-                modifier = Modifier
-                    .padding(top = 16.dp, end = 16.dp)
-                    .size(170.dp)
-                    .align(Alignment.TopEnd)
-                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                    .padding(2.dp)
-            ) {
-                val minimapCameraPositionState = rememberCameraPositionState {
-                    position = CameraPosition.fromLatLngZoom(gameState.zoneCenter!!, 17f)
-                }
-
-                // Smoothly center and zoom the minimap camera onto the shifting active zone
-                LaunchedEffect(gameState.zoneCenter, gameState.currentZoneRadius) {
-                    val radius = gameState.currentZoneRadius
-                    // Custom scale zoom for minimap viewport size
-                    val zoom = (22.5f - (Math.log(radius.toDouble()) / Math.log(2.0))).toFloat().coerceIn(12f, 19f)
-                    minimapCameraPositionState.position = CameraPosition.fromLatLngZoom(gameState.zoneCenter!!, zoom)
-                }
-
-                GoogleMap(
-                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
-                    cameraPositionState = minimapCameraPositionState,
-                    properties = MapProperties(isMyLocationEnabled = hasCameraPermission),
-                    uiSettings = MapUiSettings(
-                        zoomControlsEnabled = false,
-                        zoomGesturesEnabled = false,
-                        scrollGesturesEnabled = false,
-                        tiltGesturesEnabled = false,
-                        rotationGesturesEnabled = false,
-                        myLocationButtonEnabled = false
-                    )
+            if (gameState.isGameActive && gameState.zoneCenter != null) {
+                Box(
+                    modifier = Modifier
+                        .size(120.dp)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                        .padding(2.dp)
                 ) {
-                    // 1. Damage Zone (Red) - active shrinking storm border
-                    if (gameState.zoneCenter != null) {
-                        Circle(
-                            center = gameState.zoneCenter!!,
-                            radius = gameState.currentZoneRadius.toDouble(),
-                            fillColor = Color(0x05FF0000),
-                            strokeColor = Color.Red,
-                            strokeWidth = 2f
-                        )
+                    val minimapCameraPositionState = rememberCameraPositionState {
+                        position = CameraPosition.fromLatLngZoom(gameState.zoneCenter!!, 17f)
                     }
 
-                    // 2. Safe Zone (White) - current round's destination boundary
-                    if (gameState.nextZoneCenter != null) {
-                        Circle(
-                            center = gameState.nextZoneCenter!!,
-                            radius = gameState.nextZoneRadius.toDouble(),
-                            fillColor = Color(0x0AFFFFFF),
-                            strokeColor = Color.White,
-                            strokeWidth = 1.5f
-                        )
+                    // Smoothly center and zoom the minimap camera onto the shifting active zone
+                    LaunchedEffect(gameState.zoneCenter, gameState.currentZoneRadius) {
+                        val radius = gameState.currentZoneRadius
+                        // Custom scale zoom for minimap viewport size
+                        val zoom = (22.5f - (Math.log(radius.toDouble()) / Math.log(2.0))).toFloat().coerceIn(12f, 19f)
+                        minimapCameraPositionState.position = CameraPosition.fromLatLngZoom(gameState.zoneCenter!!, zoom)
                     }
 
-                    // 3. Next Zone (Green) - preview of the subsequent safe zone if enabled
-                    if (gameState.settings.showNextRing && gameState.previewZoneCenter != null) {
-                        Circle(
-                            center = gameState.previewZoneCenter!!,
-                            radius = gameState.previewZoneRadius.toDouble(),
-                            fillColor = Color(0x0500FF00),
-                            strokeColor = Color.Green,
-                            strokeWidth = 1f
+                    GoogleMap(
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
+                        cameraPositionState = minimapCameraPositionState,
+                        properties = MapProperties(isMyLocationEnabled = hasCameraPermission),
+                        uiSettings = MapUiSettings(
+                            zoomControlsEnabled = false,
+                            zoomGesturesEnabled = false,
+                            scrollGesturesEnabled = false,
+                            tiltGesturesEnabled = false,
+                            rotationGesturesEnabled = false,
+                            myLocationButtonEnabled = false
                         )
+                    ) {
+                        // 1. Damage Zone (Red) - active shrinking storm border
+                        if (gameState.zoneCenter != null) {
+                            Circle(
+                                center = gameState.zoneCenter!!,
+                                radius = gameState.currentZoneRadius.toDouble(),
+                                fillColor = Color(0x05FF0000),
+                                strokeColor = Color.Red,
+                                strokeWidth = 2f
+                            )
+                        }
+
+                        // 2. Safe Zone (White) - current round's destination boundary
+                        if (gameState.nextZoneCenter != null) {
+                            Circle(
+                                center = gameState.nextZoneCenter!!,
+                                radius = gameState.nextZoneRadius.toDouble(),
+                                fillColor = Color(0x0AFFFFFF),
+                                strokeColor = Color.White,
+                                strokeWidth = 1.5f
+                            )
+                        }
+
+                        // 3. Next Zone (Green) - preview of the subsequent safe zone if enabled
+                        if (gameState.settings.showNextRing && gameState.previewZoneCenter != null) {
+                            Circle(
+                                center = gameState.previewZoneCenter!!,
+                                radius = gameState.previewZoneRadius.toDouble(),
+                                fillColor = Color(0x0500FF00),
+                                strokeColor = Color.Green,
+                                strokeWidth = 1f
+                            )
+                        }
                     }
                 }
             }
@@ -284,9 +293,12 @@ fun ArHudScreen(
         ) {
             Button(
                 onClick = onToggleMapView,
-                colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray.copy(alpha = 0.8f))
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
             ) {
-                Text("Map View", color = Color.White)
+                Text("Map View")
             }
         }
 
@@ -309,7 +321,7 @@ fun ArHudScreen(
                     if (!gameState.hasVotedInCurrentPoll) {
                         Button(
                             onClick = { gameViewModel.castVote(context, true) },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                         ) {
                             Text("Agree to End")
                         }
@@ -323,7 +335,7 @@ fun ArHudScreen(
                         if (!gameState.hasVotedInCurrentPoll) {
                             Button(
                                 onClick = { gameViewModel.castVote(context, false) },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
                             ) {
                                 Text("Keep Playing")
                             }
@@ -333,7 +345,10 @@ fun ArHudScreen(
                         
                         Button(
                             onClick = { gameViewModel.cancelEndGameVote(context) },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.LightGray, contentColor = Color.Black)
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         ) {
                             Text("Cancel Request")
                         }
